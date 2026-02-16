@@ -75,7 +75,7 @@ jobs:
             ${{ runner.os }}-pip-lint-
 
       - name: Install linting tools
-        run: pip install ruff black
+        run: pip install ruff==0.8.4 black==24.10.0
 
       - name: Run ruff linter
         run: ruff check . --output-format=github
