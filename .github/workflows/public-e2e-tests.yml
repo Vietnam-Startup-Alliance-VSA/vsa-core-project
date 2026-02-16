@@ -1,0 +1,383 @@
+name: E2E Test Pipeline with Docker
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        type: choice
+        description: "Git Ref"
+        required: true
+        default: "develop"
+        options:
+          - "develop"
+          - "staging"
+          - "main"
+      sha:
+        type: string
+        description: "Git SHA (optional, will use latest if not provided)"
+        required: false
+  push:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/public-e2e-tests.yml'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.inputs.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: '24'
+  PYTHON_VERSION: '3.11'
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  # ============================================================================
+  # STAGE 1: Code Quality & Lint Checks
+  # ============================================================================
+  lint:
+    name: Code Quality Checks
+    runs-on: ubuntu-latest
+    if: ${{ github.repository == 'Vietnam-Startup-Alliance-VSA/vsa-core-project' && github.event_name != 'pull_request' }}
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ secrets.CHECKOUT_REPOSITORY }}
+          ref: ${{ github.event.inputs.sha || github.event.inputs.ref || 'develop' }}
+          ssh-key: ${{ secrets.CHECKOUT_SSH_KEY }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Cache pnpm store
+        uses: actions/cache@v4
+        with:
+          path: ~/.pnpm-store
+          key: ${{ runner.os }}-pnpm-${{ hashFiles('tests/pnpm-lock.yaml') }}
+
+      - name: Install dependencies
+        working-directory: tests
+        run: pnpm install --frozen-lockfile
+
+      - name: TypeScript check
+        working-directory: tests
+        run: pnpm exec tsc --noEmit
+
+  # ============================================================================
+  # STAGE 2: Build services with docker-compose
+  # ============================================================================
+  build:
+    name: Build Docker Images
+    runs-on: ubuntu-latest
+    if: ${{ github.repository == 'Vietnam-Startup-Alliance-VSA/vsa-core-project' && github.event_name != 'pull_request' }}
+    timeout-minutes: 30
+
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ secrets.CHECKOUT_REPOSITORY }}
+          ref: ${{ github.event.inputs.sha || github.event.inputs.ref || 'develop' }}
+          ssh-key: ${{ secrets.CHECKOUT_SSH_KEY }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build docker-compose services
+        run: |
+          docker compose -f docker-compose.yml build \
+            backend \
+            postgres \
+            redis \
+            flutter-web \
+            nginx
+        env:
+          COMPOSE_DOCKER_CLI_BUILD: 1
+          DOCKER_BUILDKIT: 1
+
+  # ============================================================================
+  # STAGE 3: API Tests (Parallel)
+  # ============================================================================
+  api-tests:
+    name: API Tests
+    runs-on: ubuntu-latest
+    if: ${{ github.repository == 'Vietnam-Startup-Alliance-VSA/vsa-core-project' && github.event_name != 'pull_request' }}
+    timeout-minutes: 30
+    needs: [lint, build]
+
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_USER: vsa_user
+          POSTGRES_PASSWORD: vsa_password
+          POSTGRES_DB: vsa_core
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U vsa_user -d vsa_core"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: redis:7.2-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ secrets.CHECKOUT_REPOSITORY }}
+          ref: ${{ github.event.inputs.sha || github.event.inputs.ref || 'develop' }}
+          ssh-key: ${{ secrets.CHECKOUT_SSH_KEY }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+          cache-dependency-path: apps/ai-backend/requirements.txt
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Cache pnpm store
+        uses: actions/cache@v4
+        with:
+          path: ~/.pnpm-store
+          key: ${{ runner.os }}-pnpm-${{ hashFiles('tests/pnpm-lock.yaml') }}
+
+      - name: Install backend dependencies
+        working-directory: apps/ai-backend
+        run: |
+          pip install -r requirements.txt
+          pip install pytest pytest-asyncio pytest-cov
+
+      - name: Initialize database
+        env:
+          POSTGRES_HOST: localhost
+          POSTGRES_PORT: 5432
+          POSTGRES_USER: vsa_user
+          POSTGRES_PASSWORD: vsa_password
+          POSTGRES_DB: vsa_core
+        run: |
+          psql -h localhost -U vsa_user -d vsa_core -c "CREATE EXTENSION IF NOT EXISTS vector;" || true
+
+      - name: Start FastAPI backend
+        working-directory: apps/ai-backend
+        run: |
+          python -m uvicorn main:app --host 0.0.0.0 --port 8000 &
+          echo "Waiting for backend to be ready..."
+          for i in {1..30}; do
+            if curl -f http://localhost:8000/health 2>/dev/null; then
+              echo "Backend is ready!"
+              exit 0
+            fi
+            echo "Attempt $i/30..."
+            sleep 2
+          done
+          echo "Backend failed to start"
+          exit 1
+        env:
+          DATABASE_URL: postgresql+asyncpg://vsa_user:vsa_password@localhost:5432/vsa_core
+          REDIS_URL: redis://localhost:6379/0
+          ENVIRONMENT: test
+
+      - name: Install test dependencies
+        working-directory: tests
+        run: pnpm install --frozen-lockfile
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ hashFiles('tests/pnpm-lock.yaml') }}
+
+      - name: Install Playwright browsers
+        working-directory: tests
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Run API tests
+        working-directory: tests
+        run: pnpm run test:api
+        timeout-minutes: 20
+        env:
+          API_BASE_URL: http://localhost:8000
+          API_URL: http://localhost:8000/api
+          DB_HOST: localhost
+          DB_PORT: 5432
+          DB_NAME: vsa_core
+          DB_USER: vsa_user
+          DB_PASSWORD: vsa_password
+          REDIS_HOST: localhost
+          REDIS_PORT: 6379
+          CI: "true"
+
+      - name: Upload API test results
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: api-test-results
+          path: tests/test-results/
+          retention-days: 30
+
+  # ============================================================================
+  # STAGE 4: E2E Tests with Docker Compose
+  # ============================================================================
+  e2e-tests:
+    name: E2E Tests - ${{ matrix.browser }}
+    runs-on: ubuntu-latest
+    if: ${{ github.repository == 'Vietnam-Startup-Alliance-VSA/vsa-core-project' && github.event_name != 'pull_request' }}
+    timeout-minutes: 45
+    needs: [lint, build]
+
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, firefox]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ secrets.CHECKOUT_REPOSITORY }}
+          ref: ${{ github.event.inputs.sha || github.event.inputs.ref || 'develop' }}
+          ssh-key: ${{ secrets.CHECKOUT_SSH_KEY }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Cache pnpm store
+        uses: actions/cache@v4
+        with:
+          path: ~/.pnpm-store
+          key: ${{ runner.os }}-pnpm-${{ hashFiles('tests/pnpm-lock.yaml') }}
+
+      - name: Install test dependencies
+        working-directory: tests
+        run: pnpm install --frozen-lockfile
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ hashFiles('tests/pnpm-lock.yaml') }}
+
+      - name: Install Playwright browsers
+        working-directory: tests
+        run: pnpm exec playwright install --with-deps ${{ matrix.browser }}
+
+      - name: Start services with docker-compose
+        run: |
+          docker compose -f docker-compose.yml up -d
+          echo "Waiting for services to be healthy..."
+
+          # Wait for backend
+          for i in {1..30}; do
+            if curl -f http://localhost:8000/health 2>/dev/null; then
+              echo "Backend is healthy"
+              break
+            fi
+            echo "Waiting for backend... ($i/30)"
+            sleep 2
+          done
+
+          # Wait for Flutter web
+          for i in {1..30}; do
+            if curl -f http://localhost:3000/health 2>/dev/null; then
+              echo "Flutter web is healthy"
+              break
+            fi
+            echo "Waiting for Flutter web... ($i/30)"
+            sleep 2
+          done
+        timeout-minutes: 5
+
+      - name: Run E2E tests (${{ matrix.browser }})
+        working-directory: tests
+        run: pnpm exec playwright test e2e -p ${{ matrix.browser }}
+        timeout-minutes: 30
+        env:
+          API_BASE_URL: http://localhost:8000
+          API_URL: http://localhost:8000/api
+          WEB_BASE_URL: http://localhost:3000
+          DB_HOST: localhost
+          DB_PORT: 5432
+          DB_NAME: vsa_core
+          DB_USER: vsa_user
+          DB_PASSWORD: vsa_password
+          REDIS_HOST: localhost
+          REDIS_PORT: 6379
+          CI: "true"
+
+      - name: Stop services
+        if: always()
+        run: |
+          docker compose -f docker-compose.yml down -v
+
+      - name: Upload E2E test results
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: e2e-test-results-${{ matrix.browser }}
+          path: tests/test-results/
+          retention-days: 30
+
+  # ============================================================================
+  # Final Report
+  # ============================================================================
+  test-results:
+    name: Test Results Summary
+    runs-on: ubuntu-latest
+    if: ${{ always() && github.repository == 'Vietnam-Startup-Alliance-VSA/vsa-core-project' && github.event_name != 'pull_request' }}
+    needs: [api-tests, e2e-tests]
+
+    steps:
+      - name: Check test results
+        run: |
+          echo "## Test Pipeline Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Lint Status**: ${{ needs.lint.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **API Tests Status**: ${{ needs.api-tests.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **E2E Tests Status**: ${{ needs.e2e-tests.result }}" >> $GITHUB_STEP_SUMMARY
+
+      - name: Fail if tests failed
+        if: |
+          needs.api-tests.result == 'failure' ||
+          needs.e2e-tests.result == 'failure'
+        run: exit 1

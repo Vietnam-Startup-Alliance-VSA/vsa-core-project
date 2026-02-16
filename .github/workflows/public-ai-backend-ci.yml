@@ -1,17 +1,21 @@
-name: AI Backend Build
+name: AI Backend CI
 
 on:
   workflow_dispatch:
     inputs:
-      channel:
+      ref:
         type: choice
-        description: "Channel"
+        description: "Git Ref"
         required: true
-        default: "development"
+        default: "develop"
         options:
-          - "development"
+          - "develop"
           - "staging"
-          - "production"
+          - "main"
+      sha:
+        type: string
+        description: "Git SHA (optional, will use latest if not provided)"
+        required: false
       build_logger_level:
         type: choice
         description: "Build Logger Level"
@@ -58,7 +62,7 @@ jobs:
         uses: actions/checkout@v6
         with:
           repository: ${{ secrets.CHECKOUT_REPOSITORY }}
-          ref: ${{ github.event.inputs.channel == 'development' && 'develop' || github.event.inputs.channel == 'staging' && 'staging' || github.event.inputs.channel == 'production' && 'main' }}
+          ref: ${{ github.event.inputs.sha || github.event.inputs.ref || 'develop' }}
           ssh-key: ${{ secrets.CHECKOUT_SSH_KEY }}
 
       - name: Set up Python
@@ -124,7 +128,7 @@ jobs:
         uses: actions/checkout@v6
         with:
           repository: ${{ secrets.CHECKOUT_REPOSITORY }}
-          ref: ${{ github.event.inputs.channel == 'development' && 'develop' || github.event.inputs.channel == 'staging' && 'staging' || github.event.inputs.channel == 'production' && 'main' }}
+          ref: ${{ github.event.inputs.sha || github.event.inputs.ref || 'develop' }}
           ssh-key: ${{ secrets.CHECKOUT_SSH_KEY }}
 
       - name: Set up Python
@@ -205,7 +209,7 @@ jobs:
         uses: actions/checkout@v6
         with:
           repository: ${{ secrets.CHECKOUT_REPOSITORY }}
-          ref: ${{ github.event.inputs.channel == 'development' && 'develop' || github.event.inputs.channel == 'staging' && 'staging' || github.event.inputs.channel == 'production' && 'main' }}
+          ref: ${{ github.event.inputs.sha || github.event.inputs.ref || 'develop' }}
           ssh-key: ${{ secrets.CHECKOUT_SSH_KEY }}
 
       - name: Set up Docker Buildx
@@ -260,7 +264,7 @@ jobs:
         uses: actions/checkout@v6
         with:
           repository: ${{ secrets.CHECKOUT_REPOSITORY }}
-          ref: ${{ github.event.inputs.channel == 'development' && 'develop' || github.event.inputs.channel == 'staging' && 'staging' || github.event.inputs.channel == 'production' && 'main' }}
+          ref: ${{ github.event.inputs.sha || github.event.inputs.ref || 'develop' }}
           ssh-key: ${{ secrets.CHECKOUT_SSH_KEY }}
 
       - name: Run Trivy vulnerability scanner
