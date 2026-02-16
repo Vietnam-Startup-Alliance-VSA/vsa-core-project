@@ -187,7 +187,7 @@ jobs:
           elif [ "${{ matrix.flavor }}" = "production" ]; then
             TARGET="lib/main_production.dart"
           fi
-          flutter build ios --flavor ${{ matrix.flavor }} --target $TARGET --no-codesign
+          flutter build ios --target $TARGET --no-codesign --release
 
       - name: Create IPA artifact directory
         run: |
