@@ -34,6 +34,10 @@ on:
         description: "Upload Artifact"
         required: true
         default: false
+  push:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/public-flutter-ci.yml'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.inputs.ref }}
