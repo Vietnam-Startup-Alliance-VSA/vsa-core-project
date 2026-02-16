@@ -12,7 +12,7 @@ on:
           - "develop"
           - "staging"
           - "main"
-      commit_sha:
+      sha:
         type: string
         description: "Git SHA (optional, will use latest if not provided)"
         required: false
