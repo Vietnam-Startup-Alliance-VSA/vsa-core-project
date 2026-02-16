@@ -1,6 +1,10 @@
 name: AI Backend Build
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/ai-backend-build.yml'
   workflow_dispatch:
     inputs:
       channel:
