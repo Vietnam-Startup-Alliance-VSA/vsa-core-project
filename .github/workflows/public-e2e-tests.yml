@@ -4,14 +4,10 @@ on:
   workflow_dispatch:
     inputs:
       ref:
-        type: choice
+        type: string
         description: "Git Ref"
         required: true
-        default: "develop"
-        options:
-          - "develop"
-          - "staging"
-          - "main"
+        default: "refs/heads/develop"
       sha:
         type: string
         description: "Git SHA (optional, will use latest if not provided)"
