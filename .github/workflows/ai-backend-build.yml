@@ -264,7 +264,6 @@ jobs:
           ssh-key: ${{ secrets.CHECKOUT_SSH_KEY }}
 
       - name: Run Trivy vulnerability scanner
-        if: false # Optionally enable this step in public repo or org owned repo.
         uses: aquasecurity/trivy-action@master
         with:
           scan-type: 'fs'
@@ -274,13 +273,13 @@ jobs:
           severity: 'HIGH,CRITICAL'
 
       - name: Upload Trivy scan results
-        if: false # Optionally enable this step in public repo or org owned repo.
-        # if: always()
+        if: always()
         uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: 'trivy-results.sarif'
 
       - name: SonarQube Scan
         uses: SonarSource/sonarqube-scan-action@v6
+        if: false
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
