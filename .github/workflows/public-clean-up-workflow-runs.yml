@@ -11,7 +11,7 @@ jobs:
     permissions:
       actions: write
       contents: read
-    if: ${{ github.repository == 'Vietnam-Startup-Alliance-VSA/vsa-core-project' && github.event_name != 'pull_request' }}
+    if: ${{ github.event_name != 'pull_request' }}
 
     steps:
       - name: Delete completed workflow runs
