@@ -8,6 +8,9 @@ on:
 jobs:
   cleanup:
     runs-on: ubuntu-latest
+    permissions:
+      actions: write
+      contents: read
     if: ${{ github.repository == 'Vietnam-Startup-Alliance-VSA/vsa-core-project' && github.event_name != 'pull_request' }}
 
     steps:
