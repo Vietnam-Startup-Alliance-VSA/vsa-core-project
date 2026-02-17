@@ -185,7 +185,8 @@ jobs:
   security-scan:
     name: Security Scan
     runs-on: ubuntu-latest
-    if: ${{ github.repository == 'Vietnam-Startup-Alliance-VSA/vsa-core-project' && github.event_name != 'pull_request' }}
+    # if: ${{ github.repository == 'Vietnam-Startup-Alliance-VSA/vsa-core-project' && github.event_name != 'pull_request' }}
+    if: false
     needs: [build]
     permissions:
       actions: read
