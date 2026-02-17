@@ -212,6 +212,28 @@ jobs:
           ref: ${{ github.event.inputs.sha || github.event.inputs.ref || 'develop' }}
           ssh-key: ${{ secrets.CHECKOUT_SSH_KEY }}
 
+      - name: Extract branch name and SHA
+        id: extract
+        run: |
+          # Extract branch name from ref (refs/heads/develop -> develop)
+          REF="${{ github.event.inputs.ref || github.ref }}"
+          BRANCH_NAME="${REF#refs/heads/}"
+          echo "branch=${BRANCH_NAME}" >> $GITHUB_OUTPUT
+
+          # Use provided SHA or get from git
+          if [ -n "${{ github.event.inputs.sha }}" ]; then
+            COMMIT_SHA="${{ github.event.inputs.sha }}"
+          else
+            COMMIT_SHA="${{ github.sha }}"
+          fi
+          SHORT_SHA="${COMMIT_SHA:0:7}"
+          echo "sha=${COMMIT_SHA}" >> $GITHUB_OUTPUT
+          echo "short_sha=${SHORT_SHA}" >> $GITHUB_OUTPUT
+
+          echo "Branch: ${BRANCH_NAME}"
+          echo "Full SHA: ${COMMIT_SHA}"
+          echo "Short SHA: ${SHORT_SHA}"
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -223,15 +245,33 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract Docker metadata
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          tags: |
-            type=sha,prefix=
-            type=ref,event=branch
-            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+      - name: Generate Docker tags
+        id: tags
+        run: |
+          REGISTRY="${{ env.REGISTRY }}"
+          IMAGE="${{ env.IMAGE_NAME }}"
+          BRANCH="${{ steps.extract.outputs.branch }}"
+          SHORT_SHA="${{ steps.extract.outputs.short_sha }}"
+
+          # Always tag with short SHA
+          TAGS="${REGISTRY}/${IMAGE}:${SHORT_SHA}"
+
+          # Tag with branch name
+          TAGS="${TAGS},${REGISTRY}/${IMAGE}:${BRANCH}"
+
+          # Tag with 'latest' for main branch
+          if [ "${BRANCH}" = "main" ]; then
+            TAGS="${TAGS},${REGISTRY}/${IMAGE}:latest"
+          fi
+
+          # Tag with 'stable' for main/staging
+          if [ "${BRANCH}" = "main" ] || [ "${BRANCH}" = "staging" ]; then
+            TAGS="${TAGS},${REGISTRY}/${IMAGE}:stable"
+          fi
+
+          echo "tags=${TAGS}" >> $GITHUB_OUTPUT
+          echo "Generated tags:"
+          echo "${TAGS}" | tr ',' '\n'
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
@@ -239,8 +279,11 @@ jobs:
           context: ${{ env.WORKING_DIR }}
           file: ${{ env.WORKING_DIR }}/Dockerfile
           push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          tags: ${{ steps.tags.outputs.tags }}
+          labels: |
+            org.opencontainers.image.source=${{ github.event.repository.html_url }}
+            org.opencontainers.image.revision=${{ steps.extract.outputs.sha }}
+            org.opencontainers.image.version=${{ steps.extract.outputs.short_sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
           platforms: linux/amd64,linux/arm64
