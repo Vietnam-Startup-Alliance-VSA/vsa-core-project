@@ -336,7 +336,9 @@ jobs:
           else
             COMMIT_SHA="${{ github.sha }}"
           fi
+          SHORT_SHA="${COMMIT_SHA:0:7}"
           echo "sha=${COMMIT_SHA}" >> $GITHUB_OUTPUT
+          echo "short_sha=${SHORT_SHA}" >> $GITHUB_OUTPUT
 
       - name: Set environment name
         id: env
@@ -359,9 +361,9 @@ jobs:
           VALUES_FILE="infra/helm/vsa-core/${{ steps.env.outputs.file }}"
 
           # Update ai-backend image tag using yq
-          yq eval '.ai-backend.image.tag = "${{ steps.extract.outputs.sha }}"' -i "$VALUES_FILE"
+          yq eval '.ai-backend.image.tag = "${{ steps.extract.outputs.short_sha }}"' -i "$VALUES_FILE"
 
-          echo "Updated $VALUES_FILE with ai-backend tag: ${{ steps.extract.outputs.sha }}"
+          echo "Updated $VALUES_FILE with ai-backend tag: ${{ steps.extract.outputs.short_sha }}"
 
       - name: Commit and push Helm values
         run: |
@@ -371,7 +373,7 @@ jobs:
           if git diff --staged --quiet; then
             echo "No changes to commit"
           else
-            git commit -m "chore(helm): update ai-backend image to ${{ steps.extract.outputs.sha }} for ${{ steps.env.outputs.name }}"
+            git commit -m "chore(helm): update ai-backend image to ${{ steps.extract.outputs.short_sha }} for ${{ steps.env.outputs.name }}"
             # Pull latest changes before pushing, resolve conflicts preferring remote
             git pull origin ${{ steps.extract.outputs.branch }} --strategy-option=theirs || true
             git push origin ${{ steps.extract.outputs.branch }}
