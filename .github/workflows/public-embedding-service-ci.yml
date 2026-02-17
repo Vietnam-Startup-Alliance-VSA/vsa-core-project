@@ -12,11 +12,6 @@ on:
         type: string
         description: "Git SHA (optional, will use latest if not provided)"
         required: false
-  push:
-    branches: [ main ]
-    paths:
-      - 'apps/embedding-service/**'
-      - '.github/workflows/public-embedding-service-ci.yml'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.inputs.ref }}
