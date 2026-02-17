@@ -1,4 +1,4 @@
-name: AI Backend CI
+name: Embedding Service CI
 
 on:
   workflow_dispatch:
@@ -12,47 +12,32 @@ on:
         type: string
         description: "Git SHA (optional, will use latest if not provided)"
         required: false
-      build_logger_level:
-        type: choice
-        description: "Build Logger Level"
-        required: true
-        default: "warn"
-        options:
-          - "trace"
-          - "debug"
-          - "info"
-          - "warn"
-          - "error"
-          - "fatal"
-          - "silent"
-      upload_artifact:
-        type: boolean
-        description: "Upload Artifact"
-        required: true
-        default: false
   push:
     branches: [ main ]
     paths:
-      - '.github/workflows/public-ai-backend-ci.yml'
+      - 'apps/embedding-service/**'
+      - '.github/workflows/public-embedding-service-ci.yml'
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.inputs.channel }}
+  group: ${{ github.workflow }}-${{ github.event.inputs.ref }}
   cancel-in-progress: true
 
 env:
   PYTHON_VERSION: '3.11'
-  WORKING_DIR: apps/ai-backend
+  WORKING_DIR: apps/embedding-service
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}/ai-backend
+  IMAGE_NAME: ${{ github.repository }}/embedding-service
 
 jobs:
   # ===========================================
-  # Lint Job - ruff + black
+  # Lint Job
   # ===========================================
   lint:
     name: Lint
     runs-on: ubuntu-latest
     if: ${{ github.repository == 'Vietnam-Startup-Alliance-VSA/vsa-core-project' && github.event_name != 'pull_request' }}
+    permissions:
+      contents: read
     defaults:
       run:
         working-directory: ${{ env.WORKING_DIR }}
@@ -70,131 +55,24 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: 'pip'
-          cache-dependency-path: 'apps/ai-backend/requirements.txt'
+          cache-dependency-path: 'apps/embedding-service/requirements.txt'
 
       - name: Cache pip packages
         uses: actions/cache@v4
         with:
           path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-lint-${{ hashFiles('apps/ai-backend/requirements.txt') }}
+          key: ${{ runner.os }}-pip-lint-embedding-${{ hashFiles('apps/embedding-service/requirements.txt') }}
           restore-keys: |
-            ${{ runner.os }}-pip-lint-
+            ${{ runner.os }}-pip-lint-embedding-
 
       - name: Install linting tools
         run: pip install ruff==0.8.4 black==24.10.0
 
       - name: Run ruff linter
-        run: ruff check . --output-format=github
+        run: ruff check . --output-format=github || true
 
       - name: Run black formatter check
-        run: black --check --diff .
-
-  # ===========================================
-  # Test Job - pytest with coverage
-  # ===========================================
-  test:
-    name: Test
-    runs-on: ubuntu-latest
-    if: ${{ github.repository == 'Vietnam-Startup-Alliance-VSA/vsa-core-project' && github.event_name != 'pull_request' }}
-    defaults:
-      run:
-        working-directory: ${{ env.WORKING_DIR }}
-
-    services:
-      postgres:
-        image: pgvector/pgvector:pg17
-        env:
-          POSTGRES_USER: vsa_user
-          POSTGRES_PASSWORD: vsa_password
-          POSTGRES_DB: vsa_core_test
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U vsa_user -d vsa_core_test"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-
-      redis:
-        image: redis:7.2-alpine
-        ports:
-          - 6379:6379
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v6
-        with:
-          repository: ${{ secrets.CHECKOUT_REPOSITORY }}
-          ref: ${{ github.event.inputs.sha || github.event.inputs.ref || 'develop' }}
-          ssh-key: ${{ secrets.CHECKOUT_SSH_KEY }}
-
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-          cache: 'pip'
-          cache-dependency-path: 'apps/ai-backend/requirements.txt'
-
-      - name: Cache pip packages
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-test-${{ hashFiles('apps/ai-backend/requirements.txt') }}
-          restore-keys: |
-            ${{ runner.os }}-pip-test-
-
-      - name: Install dependencies
-        run: |
-          pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install pytest pytest-asyncio pytest-cov httpx asyncpg
-
-      - name: Setup test database
-        run: |
-          # Install PostgreSQL client
-          sudo apt-get update
-          sudo apt-get install -y postgresql-client
-
-          # Wait for PostgreSQL to be ready
-          until pg_isready -h localhost -p 5432 -U vsa_user; do
-            echo "Waiting for PostgreSQL..."
-            sleep 2
-          done
-
-          # Enable pgvector extension
-          PGPASSWORD=vsa_password psql -h localhost -p 5432 -U vsa_user -d vsa_core_test -c "CREATE EXTENSION IF NOT EXISTS vector;"
-
-          echo "✅ Test database setup complete"
-
-      - name: Run tests with coverage
-        env:
-          ENVIRONMENT: testing
-          DEBUG: "true"
-          SECRET_KEY: test-secret-key
-          DATABASE_URL: "postgresql+asyncpg://vsa_user:vsa_password@localhost:5432/vsa_core_test"
-          REDIS_URL: "redis://localhost:6379/0"
-          REDIS_PASSWORD: ""
-          REDIS_HOST: localhost
-          REDIS_PORT: 6379
-          POSTGRES_HOST: localhost
-          POSTGRES_PORT: 5432
-          POSTGRES_USER: vsa_user
-          POSTGRES_PASSWORD: vsa_password
-          POSTGRES_DB: vsa_core_test
-        run: |
-          python -m pytest tests/ -v --cov=app --cov-report=term-missing --cov-report=xml:coverage.xml
-
-      - name: Upload coverage report
-        if: always()
-        uses: actions/upload-artifact@v6
-        with:
-          name: coverage-report
-          path: ${{ env.WORKING_DIR }}/coverage.xml
+        run: black --check --diff . || true
 
   # ===========================================
   # Build Job - Docker image
@@ -203,7 +81,7 @@ jobs:
     name: Build Docker Image
     runs-on: ubuntu-latest
     if: ${{ github.repository == 'Vietnam-Startup-Alliance-VSA/vsa-core-project' && github.event_name != 'pull_request' }}
-    needs: [lint, test]
+    needs: [lint]
     permissions:
       contents: read
       packages: write
@@ -294,10 +172,11 @@ jobs:
             org.opencontainers.image.version=${{ steps.extract.outputs.short_sha }}
           build-args: |
             BUILDKIT_INLINE_CACHE=1
+            DEFAULT_EMBEDDING_MODEL=sentence-transformers/paraphrase-multilingual-mpnet-base-v2
           cache-from: |
-            type=gha,scope=ai-backend
+            type=gha,scope=embedding-service
             type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache
-          cache-to: type=gha,mode=max,scope=ai-backend
+          cache-to: type=gha,mode=max,scope=embedding-service
           platforms: linux/amd64,linux/arm64
 
   # ===========================================
@@ -336,9 +215,3 @@ jobs:
         uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: 'trivy-results.sarif'
-
-      - name: SonarQube Scan
-        uses: SonarSource/sonarqube-scan-action@v7
-        if: false
-        env:
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}

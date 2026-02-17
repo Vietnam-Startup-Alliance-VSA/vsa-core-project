@@ -93,6 +93,24 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      # Cache Docker layers for backend
+      - name: Cache Docker layers (backend)
+        uses: actions/cache@v4
+        with:
+          path: /tmp/.buildx-cache-backend
+          key: ${{ runner.os }}-buildx-backend-${{ hashFiles('apps/ai-backend/**') }}
+          restore-keys: |
+            ${{ runner.os }}-buildx-backend-
+
+      # Cache Docker layers for flutter-web
+      - name: Cache Docker layers (flutter-web)
+        uses: actions/cache@v4
+        with:
+          path: /tmp/.buildx-cache-flutter
+          key: ${{ runner.os }}-buildx-flutter-${{ hashFiles('apps/flutter/**') }}
+          restore-keys: |
+            ${{ runner.os }}-buildx-flutter-
+
       - name: Build docker-compose services
         run: |
           docker compose -f docker-compose.yml build \
@@ -104,6 +122,7 @@ jobs:
         env:
           COMPOSE_DOCKER_CLI_BUILD: 1
           DOCKER_BUILDKIT: 1
+          BUILDKIT_INLINE_CACHE: 1
 
   # ============================================================================
   # STAGE 3: API Tests (Parallel)
