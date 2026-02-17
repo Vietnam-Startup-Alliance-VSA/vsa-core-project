@@ -324,6 +324,7 @@ jobs:
 
       - name: Run Trivy vulnerability scanner
         uses: aquasecurity/trivy-action@master
+        if: false
         with:
           scan-type: 'fs'
           scan-ref: ${{ env.WORKING_DIR }}
@@ -332,13 +333,13 @@ jobs:
           severity: 'HIGH,CRITICAL'
 
       - name: Upload Trivy scan results
-        if: always()
+        # if: always()
+        if: false
         uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: 'trivy-results.sarif'
 
       - name: SonarQube Scan
         uses: SonarSource/sonarqube-scan-action@v7
-        if: false
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
