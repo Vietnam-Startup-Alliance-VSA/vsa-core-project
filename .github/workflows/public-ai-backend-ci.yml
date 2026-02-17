@@ -297,6 +297,87 @@ jobs:
           platforms: linux/amd64,linux/arm64
 
   # ===========================================
+  # Update Helm Values Job
+  # ===========================================
+  update-helm-values:
+    name: Update Helm Values
+    runs-on: ubuntu-latest
+    needs: [build]
+    if: |
+      github.repository == 'Vietnam-Startup-Alliance-VSA/vsa-core-project' &&
+      github.event_name != 'pull_request' &&
+      (github.event.inputs.ref == 'refs/heads/main' || github.event.inputs.ref == 'refs/heads/staging' || github.event.inputs.ref == 'refs/heads/develop')
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ secrets.CHECKOUT_REPOSITORY }}
+          ref: ${{ github.event.inputs.ref || github.ref }}
+          ssh-key: ${{ secrets.CHECKOUT_SSH_KEY }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install yq
+        run: |
+          sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          sudo chmod +x /usr/local/bin/yq
+
+      - name: Extract branch and SHA
+        id: extract
+        run: |
+          REF="${{ github.event.inputs.ref || github.ref }}"
+          BRANCH_NAME="${REF#refs/heads/}"
+          echo "branch=${BRANCH_NAME}" >> $GITHUB_OUTPUT
+
+          if [ -n "${{ github.event.inputs.sha }}" ]; then
+            COMMIT_SHA="${{ github.event.inputs.sha }}"
+          else
+            COMMIT_SHA="${{ github.sha }}"
+          fi
+          echo "sha=${COMMIT_SHA}" >> $GITHUB_OUTPUT
+
+      - name: Set environment name
+        id: env
+        run: |
+          BRANCH="${{ steps.extract.outputs.branch }}"
+
+          if [[ "${BRANCH}" == "main" ]]; then
+            echo "name=prod" >> $GITHUB_OUTPUT
+            echo "file=values.yaml" >> $GITHUB_OUTPUT
+          elif [[ "${BRANCH}" == "staging" ]]; then
+            echo "name=staging" >> $GITHUB_OUTPUT
+            echo "file=values-staging.yaml" >> $GITHUB_OUTPUT
+          elif [[ "${BRANCH}" == "develop" ]]; then
+            echo "name=dev" >> $GITHUB_OUTPUT
+            echo "file=values-dev.yaml" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Update Helm values with new image tag
+        run: |
+          VALUES_FILE="infra/helm/vsa-core/${{ steps.env.outputs.file }}"
+
+          # Update ai-backend image tag using yq
+          yq eval '.ai-backend.image.tag = "${{ steps.extract.outputs.sha }}"' -i "$VALUES_FILE"
+
+          echo "Updated $VALUES_FILE with ai-backend tag: ${{ steps.extract.outputs.sha }}"
+
+      - name: Commit and push Helm values
+        run: |
+          git config user.name "GitHub Actions[bot]"
+          git config user.email "actions@github.com"
+          git add infra/helm/vsa-core/
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "chore(helm): update ai-backend image to ${{ steps.extract.outputs.sha }} for ${{ steps.env.outputs.name }}"
+            # Pull latest changes before pushing, resolve conflicts preferring remote
+            git pull origin ${{ steps.extract.outputs.branch }} --strategy-option=theirs || true
+            git push origin ${{ steps.extract.outputs.branch }}
+          fi
+
+  # ===========================================
   # Security Scan Job - Trivy
   # ===========================================
   security-scan:
