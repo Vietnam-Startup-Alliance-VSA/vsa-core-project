@@ -358,7 +358,7 @@ jobs:
 
       - name: Update Helm values with new image tag
         run: |
-          VALUES_FILE="infra/helm/vsa-core/${{ steps.env.outputs.file }}"
+          VALUES_FILE="deployment/helm/vsa-core/${{ steps.env.outputs.file }}"
 
           # Update ai-backend image tag using yq
           yq eval '.ai-backend.image.tag = "${{ steps.extract.outputs.short_sha }}"' -i "$VALUES_FILE"
@@ -369,7 +369,7 @@ jobs:
         run: |
           git config user.name "GitHub Actions[bot]"
           git config user.email "actions@github.com"
-          git add infra/helm/vsa-core/
+          git add deployment/helm/vsa-core/
           if git diff --staged --quiet; then
             echo "No changes to commit"
           else
